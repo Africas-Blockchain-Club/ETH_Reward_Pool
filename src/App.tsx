@@ -28,6 +28,7 @@ function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [rewardHistory, setRewardHistory] = useState<Map<number, string>>(new Map());
   const [participantDetails, setParticipantDetails] = useState<Participant[]>([]);
+  const [contractOwner, setContractOwner] = useState<string>('');
 
   // Initialize contract when wallet is connected
   useEffect(() => {
@@ -79,13 +80,16 @@ function App() {
     if (!contract) return;
 
     try {
-      const [roundId, roundStart, participants, poolBalance, contractRoundDuration] = await Promise.all([
+      const [roundId, roundStart, participants, poolBalance, contractRoundDuration, owner] = await Promise.all([
         contract.roundId(),
         contract.roundStart(),
         contract.getParticipants(),
         contract.getPoolBalance(),
         contract.ROUND_DURATION(),
+        contract.owner(),
       ]);
+
+      setContractOwner(owner.toLowerCase());
 
       const roundStartNum = Number(roundStart);
       const roundDurationNum = Number(contractRoundDuration);
@@ -98,14 +102,24 @@ function App() {
       let timeLeft = 0;
       let isRoundOpen = false;
 
+      console.log('Round Info:', {
+        roundId: Number(roundId),
+        roundStartNum,
+        roundDurationNum,
+        currentTime,
+        participantCount: participants?.length || 0
+      });
+
       if (roundStartNum > 0) {
         // Round has started
         timeLeft = Math.max(0, roundStartNum + roundDurationNum - currentTime);
         isRoundOpen = timeLeft > 0;
+        console.log('Round started - timeLeft:', timeLeft, 'isRoundOpen:', isRoundOpen);
       } else {
         // Round hasn't started yet (waiting for first participant)
         timeLeft = roundDurationNum; // Show full duration
         isRoundOpen = true; // Allow joining
+        console.log('Round not started yet - waiting for first participant');
       }
 
       setRoundInfo({
@@ -165,6 +179,35 @@ function App() {
     });
   };
 
+  const handleJoinPoolClick = () => {
+    console.log('Join Pool button clicked!');
+    console.log('Button state:', {
+      isRoundOpen: roundInfo.isRoundOpen,
+      isLoading,
+      account,
+      disabled: !roundInfo.isRoundOpen || isLoading || !account
+    });
+
+    if (!roundInfo.isRoundOpen) {
+      console.warn('Cannot join: Round is not open');
+      alert('Cannot join: Round is not open. Please wait for a new round or distribute rewards if round has ended.');
+      return;
+    }
+
+    if (!account) {
+      console.warn('Cannot join: Wallet not connected');
+      alert('Please connect your wallet first!');
+      return;
+    }
+
+    if (isLoading) {
+      console.warn('Cannot join: Transaction in progress');
+      return;
+    }
+
+    joinPool();
+  };
+
   const joinPool = async () => {
     if (!contract || !account) {
       alert('Please connect your wallet first!');
@@ -173,15 +216,42 @@ function App() {
 
     try {
       setIsLoading(true);
+      console.log('Attempting to join pool with amount:', contributionAmount);
+
       const amount = parseEther(contributionAmount);
+      console.log('Parsed amount (wei):', amount.toString());
+
+      console.log('Sending transaction...');
       const tx = await contract.joinPool({ value: amount });
-      await tx.wait();
-      
+      console.log('Transaction sent:', tx.hash);
+
+      console.log('Waiting for confirmation...');
+      const receipt = await tx.wait();
+      console.log('Transaction confirmed:', receipt);
+
       alert('Successfully joined the pool!');
       await loadContractData();
     } catch (error: any) {
       console.error('Error joining pool:', error);
-      alert(`Error: ${error.reason || error.message}`);
+
+      // More detailed error message
+      let errorMessage = 'Unknown error occurred';
+      if (error.reason) {
+        errorMessage = error.reason;
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else if (error.data?.message) {
+        errorMessage = error.data.message;
+      }
+
+      // Check for common errors
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001) {
+        errorMessage = 'Transaction was rejected by user';
+      } else if (error.message?.includes('insufficient funds')) {
+        errorMessage = 'Insufficient funds in your wallet';
+      }
+
+      alert(`Error: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -192,14 +262,39 @@ function App() {
 
     try {
       setIsLoading(true);
+      console.log('Attempting to distribute reward...');
+
       const tx = await contract.distributeReward();
-      await tx.wait();
-      
-      alert('Reward distributed successfully!');
+      console.log('Transaction sent:', tx.hash);
+
+      console.log('Waiting for confirmation...');
+      const receipt = await tx.wait();
+      console.log('Transaction confirmed:', receipt);
+
+      alert('Reward distributed successfully! A new round has started.');
       await loadContractData();
     } catch (error: any) {
       console.error('Error distributing reward:', error);
-      alert(`Error: ${error.reason || error.message}`);
+
+      let errorMessage = 'Unknown error occurred';
+      if (error.reason) {
+        errorMessage = error.reason;
+      } else if (error.message) {
+        errorMessage = error.message;
+      } else if (error.data?.message) {
+        errorMessage = error.data.message;
+      }
+
+      // Check for common errors
+      if (error.code === 'ACTION_REJECTED' || error.code === 4001) {
+        errorMessage = 'Transaction was rejected by user';
+      } else if (error.message?.includes('Round is still active')) {
+        errorMessage = 'Cannot distribute reward - round is still active';
+      } else if (error.message?.includes('No participants')) {
+        errorMessage = 'Cannot distribute reward - no participants in the pool';
+      }
+
+      alert(`Error: ${errorMessage}`);
     } finally {
       setIsLoading(false);
     }
@@ -300,9 +395,45 @@ function App() {
                   <p className="text-xs sm:text-sm text-gray-500">Minimum: 0.000000000000000001 ETH</p>
                 </div>
 
+                {/* Status Messages */}
+                {!account && (
+                  <div className="p-3 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
+                    <p className="text-yellow-400 text-xs sm:text-sm">
+                      ⚠️ Please connect your wallet to join the pool
+                    </p>
+                  </div>
+                )}
+
+                {account && !roundInfo.isRoundOpen && roundInfo.timeLeft === 0 && roundInfo.participants.length > 0 && (
+                  <div className="p-3 bg-red-500/20 border border-red-500/30 rounded-lg">
+                    <p className="text-red-400 text-xs sm:text-sm">
+                      ⏰ Round has ended. {account.toLowerCase() === contractOwner ? 'You can distribute rewards to start a new round.' : 'Waiting for contract owner to distribute rewards.'}
+                    </p>
+                  </div>
+                )}
+
+                {account && roundInfo.isRoundOpen && roundInfo.roundStart === 0 && (
+                  <div className="p-3 bg-green-500/20 border border-green-500/30 rounded-lg">
+                    <p className="text-green-400 text-xs sm:text-sm">
+                      🎉 Be the first to join! The 10-second timer will start when you join.
+                    </p>
+                  </div>
+                )}
+
+                {/* Debug Info - Remove this after testing */}
+                <div className="p-3 bg-blue-500/20 border border-blue-500/30 rounded-lg">
+                  <p className="text-blue-400 text-xs font-mono">
+                    DEBUG: isRoundOpen={roundInfo.isRoundOpen.toString()} |
+                    timeLeft={roundInfo.timeLeft} |
+                    roundStart={roundInfo.roundStart} |
+                    participants={roundInfo.participants.length} |
+                    account={account ? 'connected' : 'not connected'}
+                  </p>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <button
-                    onClick={joinPool}
+                    onClick={handleJoinPoolClick}
                     disabled={!roundInfo.isRoundOpen || isLoading || !account}
                     className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white px-4 sm:px-6 py-3 sm:py-4 rounded-lg font-semibold text-sm sm:text-lg transition-all duration-300 transform hover:scale-105 disabled:hover:scale-100"
                   >
@@ -311,10 +442,11 @@ function App() {
 
                   <button
                     onClick={distributeReward}
-                    disabled={roundInfo.isRoundOpen || isLoading || !account}
+                    disabled={roundInfo.isRoundOpen || isLoading || !account || account.toLowerCase() !== contractOwner}
                     className="w-full bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-700 hover:to-pink-700 disabled:from-gray-600 disabled:to-gray-700 disabled:cursor-not-allowed text-white px-4 sm:px-6 py-3 sm:py-4 rounded-lg font-semibold text-sm sm:text-lg transition-all duration-300 transform hover:scale-105 disabled:hover:scale-100"
+                    title={account && account.toLowerCase() !== contractOwner ? 'Only contract owner can distribute rewards' : ''}
                   >
-                    {isLoading ? 'Processing...' : 'Distribute Reward'}
+                    {isLoading ? 'Processing...' : 'Distribute Reward (Owner Only)'}
                   </button>
                 </div>
               </div>
@@ -412,7 +544,17 @@ function App() {
 
                 <div className="flex justify-between">
                   <span className="text-gray-400 text-sm sm:text-base">Round Duration:</span>
-                  <span className="text-sm sm:text-base">10 minutes</span>
+                  <span className="text-sm sm:text-base">10 seconds</span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:justify-between gap-1 sm:gap-2">
+                  <span className="text-gray-400 text-sm sm:text-base">Contract Owner:</span>
+                  <span className="font-mono text-xs sm:text-sm break-all sm:break-normal">
+                    {contractOwner ? `${contractOwner.slice(0, 6)}...${contractOwner.slice(-4)}` : 'Loading...'}
+                    {account && contractOwner && account.toLowerCase() === contractOwner && (
+                      <span className="ml-1 sm:ml-2 text-xs bg-purple-500 px-1 sm:px-2 py-0.5 sm:py-1 rounded">You</span>
+                    )}
+                  </span>
                 </div>
 
                 <div className="flex flex-col sm:flex-row sm:justify-between gap-1 sm:gap-2">
@@ -430,24 +572,28 @@ function App() {
 
               <ul className="space-y-1.5 sm:space-y-2 text-xs sm:text-sm">
                 <li className="flex items-start">
-                  <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                  <span className="text-green-400 mr-2 flex-shrink-0">1.</span>
                   <span>Connect your MetaMask wallet</span>
                 </li>
                 <li className="flex items-start">
-                  <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                  <span className="text-green-400 mr-2 flex-shrink-0">2.</span>
                   <span>Join the pool with minimum 0.000000000000000001 ETH</span>
                 </li>
                 <li className="flex items-start">
-                  <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
-                  <span>Wait for round to end (10 minutes)</span>
+                  <span className="text-green-400 mr-2 flex-shrink-0">3.</span>
+                  <span>Timer starts at 10 seconds when first user joins</span>
                 </li>
                 <li className="flex items-start">
-                  <span className="text-green-400 mr-2 flex-shrink-0">✓</span>
+                  <span className="text-green-400 mr-2 flex-shrink-0">4.</span>
+                  <span>After 10 seconds, contract owner distributes reward</span>
+                </li>
+                <li className="flex items-start">
+                  <span className="text-green-400 mr-2 flex-shrink-0">5.</span>
                   <span>One random participant wins entire pool!</span>
                 </li>
                 <li className="flex items-start">
-                  <span className="text-yellow-400 mr-2 flex-shrink-0">⚠</span>
-                  <span>Any participant can trigger the reward distribution</span>
+                  <span className="text-purple-400 mr-2 flex-shrink-0">🔄</span>
+                  <span>New round starts automatically after distribution</span>
                 </li>
               </ul>
             </div>
