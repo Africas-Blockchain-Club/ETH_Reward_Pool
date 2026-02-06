@@ -1,0 +1,1 @@
+{"version":3,"file":"connectors_false-CBUJNXH8.js","sources":["../../__vite-optional-peer-dep:@metamask/sdk:@wagmi/connectors:false"],"sourcesContent":["export default {};throw new Error(`Could not resolve \"@metamask/sdk\" imported by \"@wagmi/connectors\".`)"],"names":["connectors_false"],"mappings":"AAAA,MAAAA,EAAe,CAAA,EAAG,MAAM,IAAI,MAAM,oEAAoE"}
