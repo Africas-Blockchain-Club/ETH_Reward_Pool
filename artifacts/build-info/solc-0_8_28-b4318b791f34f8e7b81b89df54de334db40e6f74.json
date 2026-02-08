@@ -1,0 +1,40 @@
+{
+  "_format": "hh3-sol-build-info-1",
+  "id": "solc-0_8_28-b4318b791f34f8e7b81b89df54de334db40e6f74",
+  "solcVersion": "0.8.28",
+  "solcLongVersion": "0.8.28+commit.7893614a",
+  "userSourceNameMap": {
+    "contracts/EthRewardPool.sol": "project/contracts/EthRewardPool.sol"
+  },
+  "input": {
+    "language": "Solidity",
+    "settings": {
+      "evmVersion": "cancun",
+      "outputSelection": {
+        "*": {
+          "": [
+            "ast"
+          ],
+          "*": [
+            "abi",
+            "evm.bytecode",
+            "evm.deployedBytecode",
+            "evm.methodIdentifiers",
+            "metadata"
+          ]
+        }
+      },
+      "remappings": [
+        "project/:@openzeppelin/contracts/=npm/@openzeppelin/contracts@5.4.0/"
+      ]
+    },
+    "sources": {
+      "npm/@openzeppelin/contracts@5.4.0/utils/ReentrancyGuard.sol": {
+        "content": "// SPDX-License-Identifier: MIT\n// OpenZeppelin Contracts (last updated v5.1.0) (utils/ReentrancyGuard.sol)\n\npragma solidity ^0.8.20;\n\n/**\n * @dev Contract module that helps prevent reentrant calls to a function.\n *\n * Inheriting from `ReentrancyGuard` will make the {nonReentrant} modifier\n * available, which can be applied to functions to make sure there are no nested\n * (reentrant) calls to them.\n *\n * Note that because there is a single `nonReentrant` guard, functions marked as\n * `nonReentrant` may not call one another. This can be worked around by making\n * those functions `private`, and then adding `external` `nonReentrant` entry\n * points to them.\n *\n * TIP: If EIP-1153 (transient storage) is available on the chain you're deploying at,\n * consider using {ReentrancyGuardTransient} instead.\n *\n * TIP: If you would like to learn more about reentrancy and alternative ways\n * to protect against it, check out our blog post\n * https://blog.openzeppelin.com/reentrancy-after-istanbul/[Reentrancy After Istanbul].\n */\nabstract contract ReentrancyGuard {\n    // Booleans are more expensive than uint256 or any type that takes up a full\n    // word because each write operation emits an extra SLOAD to first read the\n    // slot's contents, replace the bits taken up by the boolean, and then write\n    // back. This is the compiler's defense against contract upgrades and\n    // pointer aliasing, and it cannot be disabled.\n\n    // The values being non-zero value makes deployment a bit more expensive,\n    // but in exchange the refund on every call to nonReentrant will be lower in\n    // amount. Since refunds are capped to a percentage of the total\n    // transaction's gas, it is best to keep them low in cases like this one, to\n    // increase the likelihood of the full refund coming into effect.\n    uint256 private constant NOT_ENTERED = 1;\n    uint256 private constant ENTERED = 2;\n\n    uint256 private _status;\n\n    /**\n     * @dev Unauthorized reentrant call.\n     */\n    error ReentrancyGuardReentrantCall();\n\n    constructor() {\n        _status = NOT_ENTERED;\n    }\n\n    /**\n     * @dev Prevents a contract from calling itself, directly or indirectly.\n     * Calling a `nonReentrant` function from another `nonReentrant`\n     * function is not supported. It is possible to prevent this from happening\n     * by making the `nonReentrant` function external, and making it call a\n     * `private` function that does the actual work.\n     */\n    modifier nonReentrant() {\n        _nonReentrantBefore();\n        _;\n        _nonReentrantAfter();\n    }\n\n    function _nonReentrantBefore() private {\n        // On the first call to nonReentrant, _status will be NOT_ENTERED\n        if (_status == ENTERED) {\n            revert ReentrancyGuardReentrantCall();\n        }\n\n        // Any calls to nonReentrant after this point will fail\n        _status = ENTERED;\n    }\n\n    function _nonReentrantAfter() private {\n        // By storing the original value once again, a refund is triggered (see\n        // https://eips.ethereum.org/EIPS/eip-2200)\n        _status = NOT_ENTERED;\n    }\n\n    /**\n     * @dev Returns true if the reentrancy guard is currently set to \"entered\", which indicates there is a\n     * `nonReentrant` function in the call stack.\n     */\n    function _reentrancyGuardEntered() internal view returns (bool) {\n        return _status == ENTERED;\n    }\n}\n"
+      },
+      "project/contracts/EthRewardPool.sol": {
+        "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.20;\n\nimport {ReentrancyGuard} from \"@openzeppelin/contracts/utils/ReentrancyGuard.sol\";\n\ncontract EthRewardPool is ReentrancyGuard {\n    address public owner;\n    uint256 public roundId;\n    uint256 public roundStart;\n    uint256 public constant ROUND_DURATION = 10 minutes;\n    uint256 public constant MIN_CONTRIBUTION = 0.000000000000000001 ether;\n\n    address payable[] public participants;\n    mapping(address => bool) public hasJoined;\n    mapping(uint256 => address payable) public rewardHistory;\n\n    event ParticipantJoined(address indexed participant, uint256 amount);\n    event RewardDistributed(address indexed recipient, uint256 amount, uint256 roundId);\n    event NewRoundStarted(uint256 roundId);\n\n    constructor() {\n        owner = msg.sender;\n        roundId = 1;\n        roundStart = block.timestamp;\n        emit NewRoundStarted(roundId);\n    }\n\n    modifier roundOpen() {\n        require(block.timestamp < roundStart + ROUND_DURATION, \"Round closed\");\n        _;\n    }\n\n    function joinPool() external payable roundOpen nonReentrant {\n        require(!hasJoined[msg.sender], \"Already joined this round\");\n        require(msg.value >= MIN_CONTRIBUTION, \"Minimum contribution is 0.000000000000000001 ETH\");\n\n        participants.push(payable(msg.sender));\n        hasJoined[msg.sender] = true;\n\n        emit ParticipantJoined(msg.sender, msg.value);\n    }\n\n    function getParticipants() external view returns (address payable[] memory) {\n        return participants;\n    }\n\n    function getPoolBalance() external view returns (uint256) {\n        return address(this).balance;\n    }\n\n    /// ⚠️ Pseudo-randomness for testing/school project only\n    function _random() internal view returns (uint256) {\n        return uint256(keccak256(abi.encodePacked(block.prevrandao, participants.length, roundId)));\n    }\n\n    function distributeReward() external nonReentrant {\n        require(block.timestamp >= roundStart + ROUND_DURATION, \"Round not finished\");\n        require(participants.length > 0, \"No participants\");\n\n        uint256 index = _random() % participants.length;\n        address payable winner = participants[index];\n\n        uint256 prize = address(this).balance;\n        (bool success, ) = winner.call{value: prize}(\"\");\n        require(success, \"Reward transfer failed\");\n\n        rewardHistory[roundId] = winner;\n        emit RewardDistributed(winner, prize, roundId);\n\n        // Reset round\n        for (uint256 i = 0; i < participants.length; i++) {\n            hasJoined[participants[i]] = false;\n        }\n        delete participants;\n\n        roundStart = block.timestamp;\n        roundId++;\n        emit NewRoundStarted(roundId);\n    }\n\n    function getRewardRecipient(uint256 _roundId) external view returns (address payable) {\n        return rewardHistory[_roundId];\n    }\n}"
+      }
+    }
+  }
+}
